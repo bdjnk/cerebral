@@ -95,8 +95,23 @@ export default function DebuggerProvider (options = {}) {
       send (data) {
         send(data, context, functionDetails, payload)
       },
-      getColor (key) {
-        return options.colors[key] || '#333'
+      wrapProvider (providerKey) {
+        const provider = context[providerKey]
+
+        context[providerKey] = Object.keys(provider).reduce((wrappedProvider, key) => {
+          const originalFunc = provider[key]
+
+          wrappedProvider[key] = (...args) => {
+            context.debugger.send({
+              method: `${providerKey}.${key}`,
+              args: args
+            })
+
+            return originalFunc.apply(provider, args)
+          }
+
+          return wrappedProvider
+        }, {})
       }
     }
 

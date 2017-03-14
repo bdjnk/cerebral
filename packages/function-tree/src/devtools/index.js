@@ -277,15 +277,12 @@ class Devtools {
       this.backlog.push(message)
     }
   }
-  Provider (options = {colors: {}}) {
+  Provider (options) {
     const sendExecutionData = this.sendExecutionData.bind(this)
     function provider (context, functionDetails, payload) {
       context.debugger = {
         send (data) {
           sendExecutionData(data, context, functionDetails, payload)
-        },
-        getColor (key) {
-          return options.colors[key] || '#333'
         }
       }
 
