@@ -88,6 +88,49 @@ const execute = FunctionTree([
 export default execute;
 ```
 
+#### Devtools
+Download the function tree standalone debugger for [Mac](https://drive.google.com/file/d/0B1pYKovu9Upyb1Bkdm5IbkdBN3c/view?usp=sharing), [Windows](https://drive.google.com/file/d/0B1pYKovu9UpyMGRRbG45dWR6R1k/view?usp=sharing) or [Linux](https://drive.google.com/file/d/0B1pYKovu9UpyMFQ5dEdnSy1aN0E/view?usp=sharing).
+
+```js
+import Devtools from 'function-tree/devtools'
+
+// Instantiate the devtools with the port
+// you are running the debugger on
+const devtools = Devtools({
+  remoteDebugger: 'localhost:8585'
+})
+
+// Add the provider to any instantiated
+// function tree you want to pass
+// information from
+const execute = FunctionTree([
+  devtools.Provider({
+    colors: {
+      someContextProvider: 'green'
+    }
+  })
+])
+
+// Watch execution of the tree
+devtools.watchExecution(execute)
+
+export default execute;
+```
+
+You can now do:
+
+```js
+function someFunction(context) {
+  context.debugger.send({
+    method: 'someMethod',
+    args: ['foo', 'bar'],
+    color: 'red'
+  })
+}
+```
+
+This is used by **ContextProvider** under the hood, but you are free to use this at your own leisure :)
+
 #### Extending the context
 
 ```js
@@ -301,6 +344,7 @@ const execute = FunctionTree([
     functionDetails.name // Name of the function
     functionDetails.functionIndex // The index of the function in the tree, like an ID
     functionDetails.function // A reference to the running function
+    functionDetails.isParallel // If the function is running in parallel with others
 
     context.execution.name // Function tree id
     context.execution.id // Current execution id
@@ -482,6 +526,15 @@ execute.on('functionEnd', (execution, functionDetails, payload) => {})
 
 // Triggers when an async function has been run
 execute.on('asyncFunction', (execution, functionDetails, payload) => {})
+
+// When a parallel execution is about to happen (array in array)
+execute.on('parallelStart', (execution, payload, functionsToResolveCount) => {})
+
+// When a function in parallel execution is done executing
+execute.on('parallelProgress', (execution, payload, functionsStillResolvingCount) => {})
+
+// When a parallel execution is done
+execute.on('parallelEnd', (execution, payload, functionsExecutedCount) => {})
 
 execute(tree)
 ```

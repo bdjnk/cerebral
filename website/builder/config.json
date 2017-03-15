@@ -1,0 +1,73 @@
+{
+  "title": "Cerebral Docs",
+  "scripts": {
+    "index": [
+      "redirectFrontPage"
+    ],
+    "docs": [
+      "https://cdnjs.cloudflare.com/ajax/libs/prism/1.6.0/prism.min.js",
+      "search",
+      "mobile"
+    ]
+  },
+  "css": {
+    "*": [
+      "main",
+      "prism"
+    ],
+    "index": ["index"],
+    "docs": ["docs"]
+  },
+  "docs": {
+    "get_started": [
+      "index",
+      "debugger",
+      "the_architecture",
+      "resources",
+      "counter",
+      "todomvc"
+    ],
+    "developer_guide": [
+      "index",
+      "state",
+      "connect",
+      "signals",
+      "actions",
+      "operators",
+      "factories",
+      "paths",
+      "compute",
+      "routing",
+      "organize",
+      "providers",
+      "test"
+    ],
+    "packages": [
+      "index",
+      "firebase",
+      "useragent",
+      "forms",
+      "storage",
+      "function_tree"
+    ],
+    "migration": [
+      "index"
+    ],
+    "api": [
+      "index",
+      "sequence",
+      "parallel",
+      "devtools",
+      "context",
+      "state",
+      "tags",
+      "container",
+      "connect",
+      "modules",
+      "operators",
+      "providers",
+      "compute",
+      "statecontainer"
+    ]
+  }
+}

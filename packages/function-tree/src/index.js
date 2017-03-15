@@ -2,10 +2,11 @@ import EventEmitter from 'eventemitter3'
 import executeTree from './executeTree'
 import createStaticTree from './staticTree'
 import ExecutionProvider from './providers/Execution'
-import InputProvider from './providers/Input'
+import PropsProvider from './providers/Props'
 import PathProvider from './providers/Path'
 import Path from './Path'
 import Abort from './Abort'
+import {Sequence, Parallel} from './primitives'
 
 /*
   Need to create a unique ID for each execution to identify it
@@ -59,9 +60,14 @@ class FunctionTreeExecution extends EventEmitter {
     const functionTree = this.functionTree
     const errorCallback = this.errorCallback
     const execution = this
+    let result
 
     functionTree.emit('functionStart', execution, funcDetails, payload)
-    const result = funcDetails.function(context)
+    try {
+      result = funcDetails.function(context)
+    } catch (error) {
+      return errorCallback(error, funcDetails)
+    }
 
     if (result instanceof Abort) {
       return functionTree.emit('abort', execution, funcDetails, payload)
@@ -72,61 +78,64 @@ class FunctionTreeExecution extends EventEmitter {
       move on
     */
     if (isPromise(result)) {
-      functionTree.emit('asyncFunction', execution, funcDetails, payload)
+      functionTree.emit('asyncFunction', execution, funcDetails, payload, result)
       result
         .then(function (result) {
+          if (result instanceof Abort) {
+            return functionTree.emit('abort', execution, funcDetails, payload)
+          }
           if (result instanceof Path) {
-            functionTree.emit('functionEnd', execution, funcDetails, payload)
+            functionTree.emit('functionEnd', execution, funcDetails, payload, result)
             next(result.toJS())
           } else if (funcDetails.outputs) {
-            functionTree.emit('functionEnd', execution, funcDetails, payload)
+            functionTree.emit('functionEnd', execution, funcDetails, payload, result)
             throw new Error('The result ' + JSON.stringify(result) + ' from function ' + funcDetails.name + ' needs to be a path')
           } else if (isValidResult(result)) {
-            functionTree.emit('functionEnd', execution, funcDetails, payload)
+            functionTree.emit('functionEnd', execution, funcDetails, payload, result)
             next({
               payload: result
             })
           } else {
-            functionTree.emit('functionEnd', execution, funcDetails, payload)
+            functionTree.emit('functionEnd', execution, funcDetails, payload, result)
             throw new Error('The result ' + JSON.stringify(result) + ' from function ' + funcDetails.name + ' is not a valid result')
           }
         })
         .catch(function (result) {
           if (result instanceof Error) {
-            errorCallback(result)
+            errorCallback(result, funcDetails)
           } else if (result instanceof Path) {
-            functionTree.emit('functionEnd', execution, funcDetails, payload)
+            functionTree.emit('functionEnd', execution, funcDetails, payload, result)
             next(result.toJS())
           } else if (funcDetails.outputs) {
             let error = new Error('The result ' + JSON.stringify(result) + ' from function ' + funcDetails.name + ' needs to be a path')
 
-            errorCallback(error)
+            errorCallback(error, funcDetails)
           } else if (isValidResult(result)) {
-            functionTree.emit('functionEnd', execution, funcDetails, payload)
+            functionTree.emit('functionEnd', execution, funcDetails, payload, result)
             next({
               payload: result
             })
           } else {
             let error = new Error('The result ' + JSON.stringify(result) + ' from function ' + funcDetails.name + ' is not a valid result')
 
-            errorCallback(error)
+            errorCallback(error, funcDetails)
           }
         })
     } else if (result instanceof Path) {
-      functionTree.emit('functionEnd', execution, funcDetails, payload)
+      functionTree.emit('functionEnd', execution, funcDetails, payload, result)
       next(result.toJS())
     } else if (funcDetails.outputs) {
-      let error = new Error('The result ' + JSON.stringify(result) + ' from function ' + funcDetails.name + ' needs to be a path')
+      let error = new Error('The result ' + JSON.stringify(result) + ' from function ' + funcDetails.name + ' needs to be a path or a Promise')
 
-      errorCallback(error)
+      errorCallback(error, funcDetails)
     } else if (isValidResult(result)) {
-      functionTree.emit('functionEnd', execution, funcDetails, payload)
+      functionTree.emit('functionEnd', execution, funcDetails, payload, result)
       next({
         payload: result
       })
     } else {
       let error = new Error('The result ' + JSON.stringify(result) + ' from function ' + funcDetails.name + ' is not a valid result')
-      errorCallback(error)
+      errorCallback(error, funcDetails)
     }
   }
 
@@ -136,7 +145,7 @@ class FunctionTreeExecution extends EventEmitter {
   createContext (funcDetails, payload, prevPayload) {
     return [
       ExecutionProvider(this, Abort),
-      InputProvider(),
+      PropsProvider(),
       PathProvider()
     ].concat(this.functionTree.contextProviders).reduce(function (currentContext, contextProvider) {
       var newContext = (
@@ -154,7 +163,15 @@ class FunctionTreeExecution extends EventEmitter {
   }
 }
 
-class FunctionTree extends EventEmitter {
+export function sequence (...args) {
+  return new Sequence(...args)
+}
+
+export function parallel (...args) {
+  return new Parallel(...args)
+}
+
+export class FunctionTree extends EventEmitter {
   constructor (contextProviders) {
     super()
     this.cachedTrees = []
@@ -164,8 +181,6 @@ class FunctionTree extends EventEmitter {
     this.runTree.on = this.on.bind(this)
     this.runTree.once = this.once.bind(this)
     this.runTree.off = this.removeListener.bind(this)
-
-    return this.runTree
   }
 
   /*
@@ -182,7 +197,9 @@ class FunctionTree extends EventEmitter {
     args.forEach((arg) => {
       if (typeof arg === 'string') {
         name = arg
-      } else if (Array.isArray(arg)) {
+      } else if (Array.isArray(arg) || arg instanceof Sequence || arg instanceof Parallel) {
+        tree = arg
+      } else if (!tree && typeof arg === 'function') {
         tree = arg
       } else if (typeof arg === 'function') {
         cb = arg
@@ -203,10 +220,10 @@ class FunctionTree extends EventEmitter {
     } else {
       staticTree = this.cachedStaticTrees[treeIdx]
     }
-    const execution = new FunctionTreeExecution(name, staticTree, this, (error) => {
+    const execution = new FunctionTreeExecution(name, staticTree, this, (error, funcDetails) => {
       cb && cb(error, execution, payload)
       setTimeout(() => {
-        this.emit('error', error, execution, payload)
+        this.emit('error', error, execution, funcDetails, payload)
       })
     })
 
@@ -221,6 +238,15 @@ class FunctionTree extends EventEmitter {
       (currentPayload) => {
         this.emit('pathEnd', execution, currentPayload)
       },
+      (currentPayload, functionsToResolve) => {
+        this.emit('parallelStart', execution, currentPayload, functionsToResolve)
+      },
+      (currentPayload, functionsResolved) => {
+        this.emit('parallelProgress', execution, currentPayload, functionsResolved)
+      },
+      (currentPayload, functionsResolved) => {
+        this.emit('parallelEnd', execution, currentPayload, functionsResolved)
+      },
       (finalPayload) => {
         this.emit('end', execution, finalPayload)
         cb && cb(null, execution, finalPayload)
@@ -230,5 +256,5 @@ class FunctionTree extends EventEmitter {
 }
 
 export default (contextProviders) => {
-  return new FunctionTree(contextProviders)
+  return new FunctionTree(contextProviders).runTree
 }

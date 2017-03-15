@@ -1,6 +1,5 @@
 /* eslint-env mocha */
 import Model from './Model'
-import Computed from './Computed'
 import assert from 'assert'
 
 describe('Model', () => {
@@ -31,7 +30,26 @@ describe('Model', () => {
       }
     })
     model.set(['foo', 'bar'], 'value2')
-    assert.deepEqual(model.flush(), {foo: {bar: true}})
+    assert.deepEqual(model.flush(), [{
+      path: ['foo', 'bar'],
+      forceChildPathUpdates: true
+    }])
+  })
+  it('should flush same path changes correctly', () => {
+    const model = new Model({
+      foo: {
+        bar: 'value'
+      }
+    })
+    model.set(['foo', 'bar'], 'value2')
+    model.set(['foo', 'bar'], 'value3')
+    assert.deepEqual(model.flush(), [{
+      path: ['foo', 'bar'],
+      forceChildPathUpdates: true
+    }, {
+      path: ['foo', 'bar'],
+      forceChildPathUpdates: true
+    }])
   })
 
   describe('SET', () => {
@@ -60,14 +78,27 @@ describe('Model', () => {
       model.merge(['foo'], {valB: 'bar'})
       assert.deepEqual(model.get(), {foo: {valA: 'foo', valB: 'bar'}})
     })
-    it('should flush changes to merged keys as well', () => {
+    it('should flush changes to merged keys when object exists', () => {
       const model = new Model({
         foo: {
           valA: 'foo'
         }
       })
       model.merge(['foo'], {valB: 'bar'})
-      assert.deepEqual(model.flush(), {foo: {valB: true}})
+      assert.deepEqual(model.flush(), [{
+        path: ['foo', 'valB'],
+        forceChildPathUpdates: true
+      }])
+    })
+    it('should flush change on object only if no existing object', () => {
+      const model = new Model({
+        foo: null
+      })
+      model.merge(['foo'], {valB: 'bar'})
+      assert.deepEqual(model.flush(), [{
+        path: ['foo'],
+        forceChildPathUpdates: true
+      }])
     })
   })
   describe('POP', () => {
@@ -121,7 +152,10 @@ describe('Model', () => {
         }
       })
       model.unset(['foo', 'bar'])
-      assert.deepEqual(model.flush(), {foo: {bar: true}})
+      assert.deepEqual(model.flush(), [{
+        path: ['foo', 'bar'],
+        forceChildPathUpdates: true
+      }])
     })
   })
   describe('CONCAT', () => {
@@ -131,41 +165,6 @@ describe('Model', () => {
       })
       model.concat(['foo'], ['bar'])
       assert.deepEqual(model.get(), {foo: ['foo', 'bar']})
-    })
-  })
-  describe('COMPUTE', () => {
-    it('should compute value from Computed', () => {
-      const fullName = Computed({
-        firstName: 'user.firstName',
-        lastName: 'user.lastName'
-      }, ({firstName, lastName}) => {
-        return `${firstName} ${lastName}`
-      })
-      const model = new Model({
-        user: {
-          firstName: 'John',
-          lastName: 'Difool'
-        }
-      })
-      assert.deepEqual(model.compute(fullName), 'John Difool')
-    })
-    it('should force recompute value from Computed', () => {
-      const fullName = Computed({
-        firstName: 'user.firstName',
-        lastName: 'user.lastName'
-      }, ({firstName, lastName}) => {
-        return `${firstName} ${lastName}`
-      })
-      const model = new Model({
-        user: {
-          firstName: 'John',
-          lastName: 'Difool'
-        }
-      })
-      model.compute(fullName)
-      model.set(['user', 'firstName'], 'Animah')
-      assert.deepEqual(model.compute(fullName), 'John Difool')
-      assert.deepEqual(model.compute(fullName, true), 'Animah Difool')
     })
   })
   describe('Prevent mutations', () => {
@@ -257,21 +256,36 @@ describe('Model', () => {
       })
     })
   })
-  describe('Enforce serializable', () => {
-    it('should throw error if value inserted is not serializable', () => {
+  describe('Serializable', () => {
+    it('should make value forceSerializable when devtools are attached', () => {
       const model = new Model({
         foo: 'bar'
-      }, {enforceSerializable: true})
-      assert.throws(() => {
-        model.set(['foo'], new Date())
-      })
+      }, {allowedTypes: [Date]})
+      model.set(['foo'], new Date())
+      assert.equal(model.state.foo.toJSON(), '[Date]')
     })
     it('should throw error if value inserted is not serializable', () => {
       const model = new Model({
         foo: 'bar'
-      }, {enforceSerializable: true})
+      }, {})
+      assert.throws(() => {
+        model.set(['foo'], new Date())
+      })
+    })
+    it('should NOT throw error if value inserted is serializable', () => {
+      const model = new Model({
+        foo: 'bar'
+      }, {})
       assert.doesNotThrow(() => {
         model.set(['foo'], [])
+      })
+    })
+    it('should NOT throw error if passing allowed type in devtools', () => {
+      const model = new Model({
+        foo: 'bar'
+      }, {allowedTypes: [Date]})
+      assert.doesNotThrow(() => {
+        model.set(['foo'], new Date())
       })
     })
   })

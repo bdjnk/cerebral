@@ -1,14 +1,10 @@
-import {isObject, isSerializable, throwError} from './utils'
+import {isObject, isComplexObject, isSerializable, throwError, forceSerializable} from './utils'
 
 class Model {
   constructor (initialState = {}, devtools = null) {
-    if (devtools) {
-      this.preventExternalMutations = devtools.preventExternalMutations
-      this.enforceSerializable = Boolean(devtools.enforceSerializable)
-    } else {
-      this.preventExternalMutations = false
-      this.enforceSerializable = false
-    }
+    this.devtools = devtools
+    this.preventExternalMutations = devtools ? devtools.preventExternalMutations : false
+
     this.state = (
       this.preventExternalMutations
         ? this.freezeObject(initialState)
@@ -55,25 +51,10 @@ class Model {
     return object
   }
   /*
-    Converts an array of paths changed to a change object that
-    will be traversed by the dependency store
+    Returns array of changes
   */
   flush () {
-    const changes = this.changedPaths.reduce((allChanges, path) => {
-      path.reduce((currentChanges, key, index) => {
-        if (index === path.length - 1 && !currentChanges[key]) {
-          currentChanges[key] = true
-        } else if (currentChanges[key] === true) {
-          currentChanges[key] = {}
-        } else if (!currentChanges[key]) {
-          currentChanges[key] = {}
-        }
-
-        return currentChanges[key]
-      }, allChanges)
-
-      return allChanges
-    }, {})
+    const changes = this.changedPaths.slice()
 
     this.changedPaths = []
 
@@ -81,23 +62,34 @@ class Model {
   }
   /*
     A generic method for making a change to a path, used
-    by multiple mutation methods
+    by multiple mutation methods. Only adds to flush when value
+    actually changed. Complex objects always causes a flush due to
+    for example array sorting
   */
-  updateIn (path, cb) {
+  updateIn (path, cb, forceChildPathUpdates = false) {
     if (this.preventExternalMutations) {
-      this.updateInFrozen(path, cb)
+      this.updateInFrozen(path, cb, forceChildPathUpdates)
 
       return
     }
 
     if (!path.length) {
-      this.state = cb(this.state)
+      cb(this.state, this, 'state')
+
+      return
     }
 
-    this.changedPaths.push(path)
     path.reduce((currentState, key, index) => {
       if (index === path.length - 1) {
-        currentState[key] = cb(currentState[key])
+        const currentValue = currentState[key]
+
+        cb(currentState[key], currentState, key)
+        if (currentState[key] !== currentValue || isComplexObject(currentState[key]) && isComplexObject(currentValue)) {
+          this.changedPaths.push({
+            path,
+            forceChildPathUpdates
+          })
+        }
       } else if (!currentState[key]) {
         throwError(`The path "${path.join('.')}" is invalid, can not update state. Does the path "${path.splice(0, path.length - 1).join('.')}" exist?`)
       }
@@ -109,16 +101,25 @@ class Model {
     Unfreezes on the way down. When done freezes state. It is optimized
     to not go down already frozen paths
   */
-  updateInFrozen (path, cb) {
+  updateInFrozen (path, cb, forceChildPathUpdates) {
     if (!path.length) {
-      this.state = this.freezeObject(cb(this.unfreezeObject(this.state)))
+      cb(this.state, this, 'state')
     }
 
-    this.changedPaths.push(path)
     this.state = this.unfreezeObject(this.state)
     path.reduce((currentState, key, index) => {
       if (index === path.length - 1) {
-        currentState[key] = cb(this.unfreezeObject(currentState[key]))
+        currentState[key] = this.unfreezeObject(currentState[key])
+
+        const currentValue = currentState[key]
+        cb(currentState[key], currentState, key)
+
+        if (currentState[key] !== currentValue || isComplexObject(currentState[key]) && isComplexObject(currentValue)) {
+          this.changedPaths.push({
+            path,
+            forceChildPathUpdates
+          })
+        }
       } else if (!currentState[key]) {
         throwError(`The path "${path.join('.')}" is invalid, can not update state. Does the path "${path.splice(0, path.length - 1).join('.')}" exist?`)
       } else {
@@ -133,15 +134,21 @@ class Model {
   /*
     Checks if value is serializable, if turned on
   */
-  checkValue (value, path) {
-    if (this.enforceSerializable && !isSerializable(value)) {
-      throwError(`You are passing a non serializable value on ${path.join('.')}`)
+  verifyValue (value, path) {
+    if (
+      this.devtools &&
+      !isSerializable(value, this.devtools.allowedTypes)
+    ) {
+      throwError(`You are passing a non serializable value into the state tree on path ${path.join('.')}`)
+    }
+    if (this.devtools) {
+      forceSerializable(value)
     }
   }
-  checkValues (values, path) {
-    if (this.enforceSerializable) {
+  verifyValues (values, path) {
+    if (this.devtools) {
       values.forEach((value) => {
-        this.checkValue(value, path)
+        this.verifyValue(value, path)
       })
     }
   }
@@ -151,76 +158,64 @@ class Model {
     }, this.state)
   }
   set (path, value) {
-    this.checkValue(value, path)
-    this.updateIn(path, () => {
-      return value
-    })
+    this.verifyValue(value, path)
+    this.updateIn(path, (_, parent, key) => {
+      parent[key] = value
+    }, true)
   }
   push (path, value) {
-    this.checkValue(value, path)
+    this.verifyValue(value, path)
     this.updateIn(path, (array) => {
-      return array.concat(value)
+      array.push(value)
     })
   }
-  merge (path, value) {
-    this.checkValue(value, path)
+  merge (path, ...values) {
+    const value = Object.assign(...values)
 
-    // We want this to behave like setting multiple keys
-    for (let prop in value) {
-      this.set(path.concat(prop), value[prop])
+    // If we already have an object we make it behave
+    // like multiple sets, indicating a change to very key.
+    // If no value it should indicate that we are setting
+    // a new object
+    if (this.get(path)) {
+      for (let prop in value) {
+        this.set(path.concat(prop), value[prop])
+      }
+    } else {
+      this.set(path, value)
     }
   }
   pop (path) {
     this.updateIn(path, (array) => {
       array.pop()
-
-      return array
     })
   }
   shift (path) {
     this.updateIn(path, (array) => {
       array.shift()
-
-      return array
     })
   }
   unshift (path, value) {
-    this.checkValue(value, path)
+    this.verifyValue(value, path)
     this.updateIn(path, (array) => {
       array.unshift(value)
-
-      return array
     })
   }
   splice (path, ...args) {
-    this.checkValues(args, path)
+    this.verifyValues(args, path)
     this.updateIn(path, (array) => {
       array.splice(...args)
-
-      return array
     })
   }
   unset (path) {
-    this.changedPaths.push(path.slice())
-    const key = path.pop()
-
-    this.updateIn(path, (obj) => {
-      delete obj[key]
-
-      return obj
-    })
+    this.updateIn(path, (_, parent, key) => {
+      delete parent[key]
+    }, true)
   }
   concat (path, value) {
-    this.checkValue(value, path)
-    this.updateIn(path, (array) => {
-      return array.concat(value)
+    this.verifyValue(value, path)
+    this.updateIn(path, (array, parent, key) => {
+      parent[key] = array.concat(value)
     })
-  }
-  compute (computed, forceRecompute = false) {
-    if (forceRecompute) {
-      computed.flag()
-    }
-    return computed.getValue(this)
   }
 }
 

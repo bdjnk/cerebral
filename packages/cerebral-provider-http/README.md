@@ -161,6 +161,19 @@ export default [
 ]
 ```
 
+To check the response for a specific http status code, simply use the code for the path name and it will be called when the response code matches.
+
+```js
+export default [
+  httpPut('/items/1', { title: 'updated' }), {
+    '201': [],
+    success: [], // all other success codes will call this path
+    '401': [],
+    error: [] // all other error codes will call this path
+  }
+]
+```
+
 ### Response
 
 ```js
@@ -170,11 +183,15 @@ function someGetAction ({http}) {
     .then((response) => {
       response.status // Status code of response
       response.result // Parsed response text
+      // The response headers are returned as an object with lowercase header
+      // names as keys. Values belonging to the same key are separated by ', '.
+      response.headers // Parsed response headers
     })
     // All other status codes
     .catch((response) => {
       response.status // Status code of response
       response.result // Parsed response text
+      response.headers // Parsed response headers
     })
 }
 ```
@@ -220,7 +237,7 @@ Note that this is only related to the **request**. If you want to define what yo
 Since Cerebral can only use serializable data in signals and the state tree, any file uploads must happen in components.
 
 ```js
-import {FileUpload} from 'cerebral-module-http'
+import {FileUpload} from 'cerebral-provider-http'
 
 export default connect({
   fileNames: 'app.fileNames'
@@ -259,11 +276,13 @@ export default connect({
     }
     render() {
       return (
-        <h4>Please choose a file.</h4>
         <div>
-          <input type="" onChange={(event) => this.onFilesChange(event)}/><br/><br/>
-          <button disabled={this.filesToUpload.length === 0} onClick={() => this.upload()}>Upload</button>
-        </div>
+          <h4>Please choose a file.</h4>
+          <div>
+            <input type="file" onChange={(event) => this.onFilesChange(event)}/><br/><br/>
+            <button disabled={this.filesToUpload.length === 0} onClick={() => this.upload()}>Upload</button>
+          </div>
+        </div>  
       )
     }
   }

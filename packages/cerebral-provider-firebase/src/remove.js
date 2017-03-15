@@ -4,7 +4,10 @@ import {
 
 export default function remove (path) {
   const ref = createRef(path)
-  return ref.remove()
-          .then(() => ({}))
-          .catch((error) => ({error: error.message}))
+  return new Promise((resolve, reject) => {
+    ref.remove().then(
+      () => resolve({}),
+      (error) => reject({error: error.message})
+    )
+  })
 }

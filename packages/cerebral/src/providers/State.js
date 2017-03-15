@@ -1,4 +1,4 @@
-import {ensurePath} from '../utils'
+import {ensurePath, cleanPath} from '../utils'
 
 function StateProviderFactory () {
   const methods = [
@@ -11,23 +11,24 @@ function StateProviderFactory () {
     'unshift',
     'splice',
     'unset',
-    'concat',
-    'compute'
+    'concat'
   ]
   let provider = null
 
   function createProvider (context) {
     const model = context.controller.model
+    let asyncTimeout = null
 
     return methods.reduce((currentStateContext, methodKey) => {
-      if (methodKey === 'compute') {
-        currentStateContext.compute = (...args) => model.compute(...args)
-      } else if (typeof model[methodKey] === 'function') {
-        currentStateContext[methodKey] = (...args) => {
-          const path = ensurePath(args.shift())
+      currentStateContext[methodKey] = (...args) => {
+        const path = ensurePath(cleanPath(args.shift()))
 
-          return model[methodKey].apply(model, [path].concat(args))
+        if (methodKey !== 'get') {
+          clearTimeout(asyncTimeout)
+          asyncTimeout = setTimeout(() => context.controller.flush())
         }
+
+        return model[methodKey].apply(model, [path].concat(args))
       }
 
       return currentStateContext
@@ -49,6 +50,7 @@ function StateProviderFactory () {
             const path = ensurePath(argsCopy.shift())
 
             context.debugger.send({
+              datetime: Date.now(),
               type: 'mutation',
               color: '#333',
               method: methodKey,

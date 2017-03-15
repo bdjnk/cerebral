@@ -1,15 +1,25 @@
 import runValidation from '../utils/runValidation'
 
-export default function validateFieldFactory (pathTemplate) {
-  function validateField (context) {
-    const path = typeof pathTemplate === 'function' ? pathTemplate(context).value : pathTemplate
-    const fieldPath = path.split('.')
-    const formPath = fieldPath.slice().splice(0, fieldPath.length - 1)
-    const field = context.state.get(fieldPath)
-    const form = context.state.get(formPath)
-    const validationResult = runValidation(field, form)
+export default function validateFieldFactory (fieldPath) {
+  function validateField ({state, resolve}) {
+    let path
 
-    context.state.merge(fieldPath, validationResult)
+    if (typeof fieldPath === 'string') {
+      console.warn('DEPRECATION: Cerebral Forms now requires STATE TAG to be passed into validateField factory')
+      path = fieldPath
+    } else {
+      if (!resolve.isTag(fieldPath, 'state')) {
+        throw new Error('Cerebral Forms - validateField factory requires a STATE TAG')
+      }
+
+      path = resolve.path(fieldPath)
+    }
+
+    const fieldPathAsArray = path.split('.')
+    const formPath = fieldPathAsArray.slice().splice(0, fieldPathAsArray.length - 1)
+    const field = state.get(path)
+    const form = state.get(formPath.join('.'))
+    const validationResult = runValidation(field, form)
 
     let dependentFields = []
     if (Array.isArray(field.dependsOn)) {
@@ -18,27 +28,26 @@ export default function validateFieldFactory (pathTemplate) {
       dependentFields = [field.dependsOn]
     }
 
-    const depententOfValidationResult = dependentFields.reduce((currentValidationResult, stringPath) => {
+    const dependentOfValidationResult = dependentFields.reduce((currentValidationResult, stringPath) => {
       const dependentFieldPath = stringPath.split('.')
       const dependentFormPath = dependentFieldPath.slice().splice(0, dependentFieldPath.length - 1)
-      const field = context.state.get(dependentFieldPath)
-      const form = context.state.get(dependentFormPath)
-
-      if (!form) {
+      const dependentField = state.get(dependentFieldPath)
+      const dependentForm = state.get(dependentFormPath)
+      if (!dependentForm || !dependentField) {
         throw new Error(`The path ${stringPath} used with "dependsOn" on field ${fieldPath.join('.')} is not correct, please check it`)
       }
 
-      const dependentValidationResult = runValidation(field, form)
-      context.state.merge(dependentFieldPath, dependentValidationResult)
+      const dependentValidationResult = runValidation(dependentField, dependentForm)
+      state.merge(dependentFieldPath, dependentValidationResult)
 
       if (currentValidationResult.isValid && !dependentValidationResult.isValid) {
-        return dependentValidationResult
+        return Object.assign(currentValidationResult, { isValid: false })
       }
 
       return currentValidationResult
     }, validationResult)
 
-    context.state.merge(fieldPath, depententOfValidationResult)
+    state.merge(path, dependentOfValidationResult)
   }
 
   return validateField

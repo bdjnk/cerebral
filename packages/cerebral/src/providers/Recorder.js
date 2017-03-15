@@ -44,6 +44,14 @@ export default function RecorderProvider (options = {}) {
       }
     })
 
+    function addExternalEvent (type, data) {
+      currentRecording.events.push({
+        type,
+        timestamp: Date.now(),
+        data
+      })
+    }
+
     function updateDebugger (method, path, args) {
       if (context.debugger) {
         const event = new window.CustomEvent('cerebral2.client.message', {
@@ -77,7 +85,9 @@ export default function RecorderProvider (options = {}) {
         if (event.type === 'mutation') {
           mutate(event)
         } else if (event.type === 'flush') {
-          controller.flush(currentEventIndex === 0)
+          controller.flush()
+        } else {
+          controller.emit(event.type, event.data)
         }
 
         lastEventTimestamp = event.timestamp
@@ -123,6 +133,7 @@ export default function RecorderProvider (options = {}) {
         }
 
         resetState()
+        controller.emit('recorder:seek', seek)
       },
       play (options = {}) {
         if (isPlaying || isRecording) {
@@ -140,7 +151,9 @@ export default function RecorderProvider (options = {}) {
             originalRunSignal.apply(controller, args)
           }
         }
+        controller.flush(true)
         runNextEvent()
+        controller.emit('recorder:play', currentSeek, options)
       },
       record (options = {}) {
         // If we are recording over the previous stuff, go back to start
@@ -164,7 +177,11 @@ export default function RecorderProvider (options = {}) {
           start: Date.now(),
           events: []
         }
+
+        controller.on('recorder:event', addExternalEvent)
+
         isRecording = true
+        controller.emit('recorder:record', options)
       },
       stop () {
         const wasPlaying = isPlaying
@@ -172,6 +189,7 @@ export default function RecorderProvider (options = {}) {
         isPlaying = false
         isRecording = false
         controller.runSignal = originalRunSignal
+        controller.off('recorder:event', addExternalEvent)
 
         if (wasPlaying) {
           return
@@ -183,12 +201,14 @@ export default function RecorderProvider (options = {}) {
           type: 'flush',
           timestamp: Date.now()
         })
+        controller.emit('recorder:stop')
       },
       pause () {
         ended = Date.now()
         currentSeek = ended - started
         clearTimeout(nextEventTimeout)
         isPlaying = false
+        controller.emit('recorder:pause', currentSeek)
       },
       getRecording () {
         return currentRecording

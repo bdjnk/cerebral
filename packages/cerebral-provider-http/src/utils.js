@@ -53,14 +53,48 @@ export function urlEncode (obj, prefix) {
   return str.join('&')
 }
 
-export function convertObjectWithTemplates (obj, context) {
-  if (typeof obj === 'function') {
-    return obj(context).value
+export function convertObjectWithTemplates (obj, resolve) {
+  if (resolve.isTag(obj)) {
+    return resolve.value(obj)
   }
 
   return Object.keys(obj).reduce((convertedObject, key) => {
-    convertedObject[key] = typeof obj[key] === 'function' ? obj[key](context).value : obj[key]
-
+    convertedObject[key] = resolve.value(obj[key])
     return convertedObject
   }, {})
+}
+
+export function parseHeaders (rawHeaders) {
+  const headerPairs = rawHeaders.replace(/\r?\n$/, '').split(/\r?\n/)
+
+  return headerPairs.reduce((parsedHeaders, headerPair) => {
+    const index = headerPair.indexOf(':')
+    const key = headerPair.substr(0, index).trim().toLowerCase()
+    const value = headerPair.substr(index + 1).trim()
+    if (key) {
+      parsedHeaders[key] = parsedHeaders[key]
+        ? parsedHeaders[key] + ', ' + value
+        : value
+    }
+
+    return parsedHeaders
+  }, {})
+}
+
+function callNextPath (response, path, defaultPath) {
+  return path['' + response.status]
+    ? path['' + response.status](response)
+    : path[defaultPath](response)
+}
+
+export function processResponse (httpAction, path) {
+  return httpAction
+    .then((response) => callNextPath(response, path, 'success'))
+    .catch((response) => {
+      if (response.isAborted) {
+        return path.abort(response)
+      }
+
+      return callNextPath(response, path, 'error')
+    })
 }

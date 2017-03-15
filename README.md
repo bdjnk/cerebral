@@ -34,7 +34,8 @@ The entire Cerebral codebase has been rewritten to encourage contributions. The 
 
 1. Clone the monorepo: `git clone https://github.com/cerebral/cerebral.git`
 2. In root: `npm install`
-3. Run `npm run setup` which will build code and bootstrap it together
+3. Run `npm run setup:packages` which will build packages source code and link it together
+4. Run `npm run setup` if you need to set up whole repo (docs, demos, tutorials, debuggers)
 
 The packages are located under `packages` folder and there is **no need** to run `npm install` for each package.
 
@@ -59,7 +60,7 @@ $ unlink node_modules/cerebral
 ```
 
 ### Running demos
-Go to the respective `packages/some-demo-folder` and run `npm start`
+Go to the respective `demos/some-demo-folder` and run `npm start`
 
 ### Testing
 You can run all tests in all packages from root:
@@ -73,7 +74,7 @@ Or you can run tests for specific packages by going to package root and do the s
 ### Changing the code
 When you make a code change you should create a branch first. When the code is changed and backed up by a test you can commit it from **the root** using:
 
-`git run commit`
+`npm run commit`
 
 This will give you a guide to creating a commit message. Then you just push and create a pull request as normal on Github.
 

@@ -2,20 +2,48 @@
 import Controller from '../Controller'
 import assert from 'assert'
 import {debounce} from './'
+import {parallel} from '../'
 
 describe('operator.debounce', () => {
   it('should debounce execution', (done) => {
-    let discardedCount = 0
-    const controller = new Controller({
+    const result = []
+    const controller = Controller({
       signals: {
         test: [
-          debounce(50, [
-            () => {
-              assert.equal(discardedCount, 1)
+          debounce(50), {
+            continue: [() => {
+              assert.deepEqual(result, ['discard'])
               done()
-            }
-          ]),
-          () => { discardedCount++ }
+            }],
+            discard: [
+              () => { result.push('discard') }
+            ]
+          }
+        ]
+      }
+    })
+    controller.getSignal('test')()
+    setTimeout(() => {
+      controller.getSignal('test')()
+    }, 10)
+  })
+  it('should debounce execution in parallel', (done) => {
+    const result = []
+    const controller = Controller({
+      signals: {
+        test: [
+          parallel([
+            debounce(50), {
+              continue: [
+                () => {
+                  assert.deepEqual(result, ['parallel', 'parallel', 'discard'])
+                  done()
+                }
+              ],
+              discard: [() => { result.push('discard') }]
+            },
+            () => { result.push('parallel') }
+          ])
         ]
       }
     })

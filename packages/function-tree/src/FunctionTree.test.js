@@ -1,5 +1,5 @@
 /* eslint-env mocha */
-import FunctionTree from './'
+import FunctionTree, {sequence, parallel} from './'
 import assert from 'assert'
 
 describe('FunctionTree', () => {
@@ -18,6 +18,15 @@ describe('FunctionTree', () => {
         assert.ok(true)
       }
     ])
+  })
+  it('should run sequences', () => {
+    const execute = FunctionTree()
+
+    execute(sequence([
+      () => {
+        assert.ok(true)
+      }
+    ]))
   })
   it('should pass arguments to context creator and run it for each action', () => {
     const execute = FunctionTree([
@@ -126,7 +135,19 @@ describe('FunctionTree', () => {
       foo: 'bar'
     })
   })
+  it('should indicate parallel execution on function', () => {
+    const execute = FunctionTree()
 
+    execute.once('functionStart', function (execution, functionDetails) {
+      assert.ok(true)
+    })
+    execute([
+      parallel([
+        () => {},
+        () => {}
+      ])
+    ])
+  })
   it('should pass final payload on end event', () => {
     const execute = FunctionTree()
     execute.once('end', (execution, payload) => {
@@ -172,7 +193,7 @@ describe('FunctionTree', () => {
       })
     })
   })
-  it('should give error when path and no path returned', () => {
+  it('should give error when path and no path returned', (done) => {
     function actionA () {
       return {
         foo: 'bar'
@@ -185,8 +206,9 @@ describe('FunctionTree', () => {
         success: []
       }
     ]
-    execute.once('error', () => {
-      assert.ok(true)
+    execute.once('error', (error) => {
+      assert.ok(error.message.match(/needs to be a path or a Promise/))
+      done()
     })
     execute(tree)
   })
@@ -239,5 +261,150 @@ describe('FunctionTree', () => {
     execute(tree)
     assert(branchStartCount, 2)
     assert(branchEndCount, 2)
+  })
+  it('should pass correct props on empty paths', () => {
+    function actionA ({path}) {
+      return path.true()
+    }
+    function actionB ({props}) {
+      assert.deepEqual(props, {foo: 'bar'})
+    }
+    const execute = FunctionTree([])
+    const tree = [
+      actionA, {
+        true: [],
+        false: []
+      },
+      actionB
+    ]
+    execute(tree, {
+      foo: 'bar'
+    })
+  })
+  it('should emit parallel events', (done) => {
+    function actionA () {
+      return Promise.resolve({bar: 'baz'})
+    }
+    function actionB () {
+      return Promise.resolve()
+    }
+    const execute = FunctionTree([])
+    const tree = [
+      [
+        actionA,
+        actionB
+      ]
+    ]
+    execute.once('parallelStart', (execution, currentPayload, functionsToResolve) => {
+      assert.ok(execution)
+      assert.deepEqual(currentPayload, {
+        foo: 'bar'
+      })
+      assert.equal(functionsToResolve, 2)
+    })
+    execute.once('parallelProgress', (execution, currentPayload, functionsResolving) => {
+      assert.ok(execution)
+      assert.deepEqual(currentPayload, {
+        foo: 'bar',
+        bar: 'baz'
+      })
+      assert.equal(functionsResolving, 1)
+    })
+    execute.once('parallelEnd', (execution, currentPayload, functionsResolved) => {
+      assert.ok(execution)
+      assert.deepEqual(currentPayload, {
+        foo: 'bar'
+      })
+      assert.equal(functionsResolved, 2)
+    })
+    execute.once('end', (execution, finalPayload) => {
+      assert.deepEqual(finalPayload, {
+        foo: 'bar',
+        bar: 'baz'
+      })
+      done()
+    })
+
+    execute(tree, {
+      foo: 'bar'
+    })
+  })
+  it('should run functions in parallel', (done) => {
+    const results = []
+    function funcA () {
+      return Promise.resolve().then(() => { results.push('A') })
+    }
+    function funcB () {
+      results.push('B')
+    }
+    const execute = FunctionTree([])
+    const tree = [
+      parallel([
+        funcA,
+        funcB
+      ])
+    ]
+
+    execute.once('end', () => {
+      assert.deepEqual(results, ['B', 'A'])
+      done()
+    })
+
+    execute(tree)
+  })
+  it('should run grouped functions sequencially inside parallel', (done) => {
+    const results = []
+    function funcA () {
+      return Promise.resolve().then(() => { results.push('A') })
+    }
+    function funcB () {
+      results.push('B')
+    }
+    const group = [
+      function funC () {
+        return Promise.resolve().then(() => { results.push('C') })
+      },
+      function funcD () {
+        results.push('D')
+      }
+    ]
+    const execute = FunctionTree([])
+    const tree = [
+      parallel([
+        funcA,
+        funcB,
+        group
+      ])
+    ]
+
+    execute.once('end', () => {
+      assert.deepEqual(results, ['B', 'A', 'C', 'D'])
+      done()
+    })
+
+    execute(tree)
+  })
+  it('should run functions after sequence', (done) => {
+    let executedCount = 0
+    const execute = FunctionTree([])
+
+    function funcA () { executedCount++ }
+    function funcB () { executedCount++ }
+    function funcC () { executedCount++ }
+
+    const tree = [
+      [
+        funcA,
+        funcB
+      ],
+      funcC
+    ]
+
+    execute.once('end', () => {
+      assert.equal(executedCount, 3)
+      done()
+    })
+
+    execute(tree)
   })
 })

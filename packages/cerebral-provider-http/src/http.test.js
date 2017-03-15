@@ -1,6 +1,6 @@
 /* eslint-env mocha */
 import {Controller} from 'cerebral'
-import {string, input} from 'cerebral/operators'
+import {string, props} from 'cerebral/tags'
 import HttpProvider, {httpGet, httpPost, httpPut, httpPatch, httpDelete} from './'
 import assert from 'assert'
 import mock from 'xhr-mock'
@@ -24,8 +24,12 @@ describe('Http Provider', () => {
               .then(path.success)
           }, {
             success: [
-              ({input}) => {
-                assert.deepEqual(input, {result: {foo: 'bar'}, status: 200})
+              ({props}) => {
+                assert.deepEqual(props, {
+                  result: {foo: 'bar'},
+                  status: 200,
+                  headers: {'content-type': 'application/json'}
+                })
                 done()
               }
             ]
@@ -193,19 +197,19 @@ describe('Http Provider', () => {
       providers: [HttpProvider()],
       signals: {
         test: [
-          httpGet(string`/items/${input`itemId`}`), {
+          httpGet(string`/items/${props`itemId`}`), {
             success: [() => { responseCount++ }]
           },
-          httpPost(string`/items/${input`itemId`}`), {
+          httpPost(string`/items/${props`itemId`}`), {
             success: [() => { responseCount++ }]
           },
-          httpPut(string`/items/${input`itemId`}`), {
+          httpPut(string`/items/${props`itemId`}`), {
             success: [() => { responseCount++ }]
           },
-          httpPatch(string`/items/${input`itemId`}`), {
+          httpPatch(string`/items/${props`itemId`}`), {
             success: [() => { responseCount++ }]
           },
-          httpDelete(string`/items/${input`itemId`}`), {
+          httpDelete(string`/items/${props`itemId`}`), {
             success: [() => { responseCount++ }]
           },
           () => {
@@ -218,5 +222,62 @@ describe('Http Provider', () => {
     controller.getSignal('test')({
       itemId: 1
     })
+  })
+  it('should allow factories to accept tags in props data', (done) => {
+    const mockResponse = (req, res) => {
+      assert.equal(req.body(), JSON.stringify({data: 1}))
+      return res
+        .status(200)
+        .header('Content-Type', 'application/json')
+    }
+
+    mock.post('/test', mockResponse)
+    mock.put('/test', mockResponse)
+    mock.patch('/test', mockResponse)
+
+    const controller = Controller({
+      providers: [HttpProvider()],
+      signals: {
+        test: [
+          httpPost('/test', { data: props`data` }), {
+            success: []
+          },
+          httpPut('/test', { data: props`data` }), {
+            success: []
+          },
+          httpPatch('/test', { data: props`data` }), {
+            success: []
+          },
+          () => {
+            done()
+          }
+        ]
+      }
+    })
+    controller.getSignal('test')({
+      data: 1
+    })
+  })
+  it('should call status code paths', (done) => {
+    mock.get('/items/201', (req, res) => {
+      return res.status(201).header('Content-Type', 'application/json')
+    })
+
+    let responseCount = 0
+    const controller = Controller({
+      providers: [HttpProvider()],
+      signals: {
+        test: [
+          httpGet('/items/201'), {
+            '201': [() => { responseCount++ }]
+          },
+          () => {
+            assert.equal(responseCount, 1)
+            done()
+          }
+        ]
+      }
+    })
+    controller.getSignal('test')()
   })
 })

@@ -1,3 +1,4 @@
+/* eslint-disable no-useless-escape */
 const rules = {
   isExisty (value) {
     return value !== null && value !== undefined
@@ -64,7 +65,7 @@ const rules = {
     return value.length <= length
   },
   minLength (value, form, length) {
-    return value.length >= length
+    return !rules.isExisty(value) || rules.isEmpty(value) || value.length >= length
   }
 }
 

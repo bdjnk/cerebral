@@ -31,7 +31,7 @@ export function goTo (url) {
 }
 
 export default function Router (options = {}) {
-  options.mapper = urlMapper({query: options.query})
+  options.mapper = options.mapper || urlMapper({query: options.query})
 
   return (controller) => {
     if (!options.mapper || typeof options.mapper.map !== 'function') {
@@ -49,7 +49,11 @@ export default function Router (options = {}) {
     }
     options.baseUrl = (options.baseUrl || '') + (options.onlyHash ? '#' : '')
 
-    const signals = getRoutableSignals(routesConfig, controller)
+    let signals = {}
+
+    controller.once('initialized', () => {
+      signals = getRoutableSignals(routesConfig, controller)
+    })
 
     function onUrlChange (event) {
       let url = event ? event.target.value : addressbar.value
@@ -82,18 +86,20 @@ export default function Router (options = {}) {
       const signal = signals[execution.name]
       if (signal) {
         const route = signal.route
-        const input = payload
+        const props = payload
 
-        addressbar.value = options.baseUrl + options.mapper.stringify(route, input)
+        addressbar.value = options.baseUrl + options.mapper.stringify(route, props)
       }
     }
 
     function init () {
       addressbar.on('change', onUrlChange)
       controller.runTree.on('start', onSignalStart)
-      if (!options.preventAutostart) {
-        onUrlChange()
-      }
+      controller.once('initialized', () => {
+        if (!options.preventAutostart) {
+          onUrlChange()
+        }
+      })
     }
 
     const contextProvider = {

@@ -1,4 +1,5 @@
 {
-  "lerna": "2.0.0-beta.30",
-  "version": "independent"
+  "lerna": "2.0.0-beta.37",
+  "version": "independent",
+  "packages": ["packages/*", "website/*", "demos/*", "babel/*", "debugger/", "."]
 }

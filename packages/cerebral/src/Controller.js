@@ -1,14 +1,13 @@
 import DependencyStore from './DependencyStore'
-import FunctionTree from 'function-tree'
+import {FunctionTree} from 'function-tree'
 import Module from './Module'
 import Model from './Model'
-import {ensurePath, isDeveloping, throwError, isSerializable, verifyStrictRender} from './utils'
-import VerifyInputProvider from './providers/VerifyInput'
+import {ensurePath, isDeveloping, throwError, isSerializable, forceSerializable, isObject, getProviders, cleanPath} from './utils'
+import VerifyPropsProvider from './providers/VerifyProps'
 import StateProvider from './providers/State'
 import DebuggerProvider from './providers/Debugger'
 import ControllerProvider from './providers/Controller'
-import EventEmitter from 'eventemitter3'
-import {dependencyStore as computedDependencyStore} from './Computed'
+import ResolveProvider from './providers/Resolve'
 
 /*
   The controller is where everything is attached. The devtools
@@ -16,23 +15,31 @@ import {dependencyStore as computedDependencyStore} from './Computed'
   The controller creates the function tree that will run all signals,
   based on top level providers and providers defined in modules
 */
-class Controller extends EventEmitter {
+class Controller extends FunctionTree {
   constructor ({state = {}, signals = {}, providers = [], modules = {}, router, devtools = null, options = {}}) {
     super()
-    this.computedDependencyStore = computedDependencyStore
+    const getSignal = this.getSignal
+
+    this.getSignal = () => {
+      throwError('You are grabbing a signal before controller has initialized, please wait for "initialized" event')
+    }
     this.componentDependencyStore = new DependencyStore()
     this.options = options
     this.flush = this.flush.bind(this)
     this.devtools = devtools
     this.model = new Model({}, this.devtools)
-    this.module = new Module([], {
+    this.module = new Module(this, [], {
       state,
       signals,
       modules
-    }, this)
+    })
     this.router = router ? router(this) : null
 
-    const allProviders = [
+    if (options.strictRender) {
+      console.warn('DEPRECATION - No need to use strictRender option anymore, it is the only render mode now')
+    }
+
+    this.contextProviders = [
       ControllerProvider(this)
     ].concat(
       this.router ? [
@@ -44,74 +51,68 @@ class Controller extends EventEmitter {
       ] : []
     )).concat((
       isDeveloping() ? [
-        VerifyInputProvider
+        VerifyPropsProvider
       ] : []
     )).concat(
-      StateProvider()
+      StateProvider(),
+      ResolveProvider()
     ).concat(
-      providers.concat(this.module.getProviders())
+      providers.concat(getProviders(this.module))
     )
 
-    this.runTree = new FunctionTree(allProviders)
-    this.runTree.on('asyncFunction', () => this.flush())
-    this.runTree.on('pathEnd', () => this.flush())
-    this.runTree.on('end', () => this.flush())
+    this.on('asyncFunction', (execution, funcDetails) => {
+      if (!funcDetails.isParallel) {
+        this.flush()
+      }
+    })
+    this.on('parallelStart', () => this.flush())
+    this.on('parallelProgress', (execution, currentPayload, functionsResolving) => {
+      if (functionsResolving === 1) {
+        this.flush()
+      }
+    })
+    this.on('end', () => this.flush())
 
     if (this.devtools) {
       this.devtools.init(this)
-    } else if (
-      process.env.NODE_ENV !== 'production' &&
+    }
+
+    if (
+      !this.devtools &&
+      isDeveloping() &&
       typeof navigator !== 'undefined' &&
       /Chrome/.test(navigator.userAgent)
     ) {
-      console.warn('You are not using the Cerebral devtools. It is highly recommended to use it in combination with the debugger: https://cerebral.github.io/cerebral-website/getting-real/03_devtools.html')
+      console.warn('You are not using the Cerebral devtools. It is highly recommended to use it in combination with the debugger: https://cerebral.github.io/cerebral-website/install/02_debugger.html')
     }
+
+    this.getSignal = getSignal
 
     if (this.router) this.router.init()
 
     this.model.flush()
+
     this.emit('initialized')
   }
   /*
-    Whenever computeds and components needs to be updated, this method
+    Whenever components needs to be updated, this method
     can be called
   */
   flush (force) {
     const changes = this.model.flush()
 
-    this.updateComputeds(changes, force)
+    if (!force && !Object.keys(changes).length) {
+      return
+    }
+
     this.updateComponents(changes, force)
     this.emit('flush', changes, Boolean(force))
   }
-  updateComputeds (changes, force) {
-    let computedsAboutToBecomeDirty
-
-    if (force) {
-      computedsAboutToBecomeDirty = this.computedDependencyStore.getAllUniqueEntities()
-    } else if (this.options.strictRender) {
-      computedsAboutToBecomeDirty = this.computedDependencyStore.getStrictUniqueEntities(changes)
-    } else {
-      computedsAboutToBecomeDirty = this.computedDependencyStore.getUniqueEntities(changes)
-    }
-
-    computedsAboutToBecomeDirty.forEach((computed) => {
-      computed.flag()
-    })
-  }
-  /*
-    On "flush" use changes to extract affected components
-    from dependency store and render them
-  */
   updateComponents (changes, force) {
     let componentsToRender = []
 
     if (force) {
       componentsToRender = this.componentDependencyStore.getAllUniqueEntities()
-    } else if (this.options.strictRender) {
-      componentsToRender = this.componentDependencyStore.getStrictUniqueEntities(changes)
-      if (this.devtools && this.devtools.verifyStrictRender) {
-        verifyStrictRender(changes, this.componentDependencyStore.map)
-      }
     } else {
       componentsToRender = this.componentDependencyStore.getUniqueEntities(changes)
     }
@@ -121,7 +122,7 @@ class Controller extends EventEmitter {
       if (this.devtools) {
         this.devtools.updateComponentsMap(component)
       }
-      component._update(force)
+      component._updateFromState(changes, force)
     })
     const end = Date.now()
 
@@ -139,38 +140,41 @@ class Controller extends EventEmitter {
     Method called by view to grab state
   */
   getState (path) {
-    return this.model.get(ensurePath(path))
-  }
-  /*
-    Checks if payload is serializable
-  */
-  isSerializablePayload (payload) {
-    if (!isSerializable(payload)) {
-      return false
-    }
-
-    return Object.keys(payload).reduce((isSerializablePayload, key) => {
-      if (!isSerializable(payload[key])) {
-        return false
-      }
-
-      return isSerializablePayload
-    }, true)
+    return this.model.get(ensurePath(cleanPath(path)))
   }
   /*
     Uses function tree to run the array and optional
     payload passed in. The payload will be checkd
   */
-  runSignal (name, signal, payload = {}) {
-    if (this.devtools && this.devtools.enforceSerializable && !this.isSerializablePayload(payload)) {
-      throwError(`You passed an invalid payload to signal "${name}". Only serializable payloads can be passed to a signal`)
+  runSignal (name, signal, payload = {}, cb) {
+    if (this.devtools && (!isObject(payload) || !isSerializable(payload))) {
+      console.warn(`You passed an invalid payload to signal "${name}". Only serializable payloads can be passed to a signal. The payload has been ignored. This is the object:`, payload)
+      payload = {}
     }
 
-    this.runTree(name, signal, payload || {}, (error) => {
-      if (error) {
-        throw error
-      }
-    })
+    if (this.devtools) {
+      payload = Object.keys(payload).reduce((currentPayload, key) => {
+        if (!isSerializable(payload, this.devtools.allowedTypes)) {
+          console.warn(`You passed an invalid payload to signal "${name}", on key "${key}". Only serializable values like Object, Array, String, Number and Boolean can be passed in. Also these special value types:`, this.devtools.allowedTypes)
+
+          return currentPayload
+        }
+
+        currentPayload[key] = forceSerializable(payload[key])
+
+        return currentPayload
+      }, {})
+    }
+
+    if (this._events.error) {
+      this.runTree(name, signal, payload)
+    } else {
+      this.runTree(name, signal, payload, (err) => {
+        if (err) {
+          throw err
+        }
+      })
+    }
   }
   /*
     Returns a function which binds the name/path of signal,
@@ -189,10 +193,61 @@ class Controller extends EventEmitter {
       throwError(`There is no signal at path "${path}"`)
     }
 
-    return function (payload) {
-      this.runSignal(path, signal, payload)
-    }.bind(this)
+    return signal
   }
+
+  addModule (path, module) {
+    const pathArray = path.split('.')
+    const moduleKey = pathArray.pop()
+    const parentModule = pathArray.reduce((currentModule, key) => {
+      if (!currentModule) {
+        throwError(`The path "${pathArray.join('.')}" is invalid, can not add module. Does the path "${pathArray.splice(0, path.length - 1).join('.')}" exist?`)
+      }
+      return currentModule.modules[key]
+    }, this)
+
+    parentModule.module.modules[moduleKey] = module
+
+    if (module.state) {
+      this.model.set(path.split('.'), module.state)
+    }
+
+    if (module.provider) {
+      this.contextProviders.push(module.provider)
+    }
+
+    this.flush()
+  }
+
+  removeModule (path) {
+    if (!path) {
+      console.warn('Controller.removeModule requires a Module Path')
+      return null
+    }
+
+    const pathArray = path.split('.')
+    const moduleKey = pathArray.pop()
+
+    const parentModule = pathArray.reduce((currentModule, key) => {
+      if (!currentModule) {
+        throwError(`The path "${pathArray.join('.')}" is invalid, can not remove module. Does the path "${pathArray.splice(0, path.length - 1).join('.')}" exist?`)
+      }
+      return currentModule.modules[key]
+    }, this)
+
+    const module = parentModule.module.modules[moduleKey]
+
+    if (module.provider) {
+      this.contextProviders.splice(this.contextProviders.indexOf(module.provider), 1)
+    }
+
+    delete parentModule.module.modules[moduleKey]
+
+    this.model.unset(path.split('.'))
+
+    this.flush()
+  }
+
 }
 
 export default function (...args) {

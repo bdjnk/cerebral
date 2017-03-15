@@ -39,7 +39,7 @@ describe('Recorder', () => {
           assert.equal(recording.initialState[0].value, JSON.stringify({
             foo: 'bar'
           }))
-          assert.equal(recording.events.length, 4)
+          assert.equal(recording.events.length, 3)
         }]
       },
       providers: [RecorderProvider({
@@ -170,7 +170,6 @@ describe('Recorder', () => {
           initialState: ['foo']
         })],
         update: [({state}) => state.set('foo', 'bar2')],
-        update2: [({state}) => state.set('foo', 'bar3')],
         stop: [({recorder}) => recorder.stop()],
         play: [({recorder}) => recorder.play({
           allowedSignals: ['stop']
@@ -183,24 +182,22 @@ describe('Recorder', () => {
     controller.getSignal('record')()
     controller.getSignal('update')()
     controller.getSignal('stop')()
+    controller.once('flush', (changes) => {
+      assert.deepEqual(changes, [{
+        path: ['foo'],
+        forceChildPathUpdates: true
+      }])
+    })
     controller.getSignal('play')()
-    controller.once('flush', (changes) => {
-      assert.deepEqual(changes, {})
-    })
-    timeout.tick()
     timeout.tick()
     controller.once('flush', (changes) => {
-      assert.deepEqual(changes, {
-        foo: true
-      })
-    })
-    timeout.tick()
-    controller.once('flush', (changes) => {
-      assert.deepEqual(changes, {})
+      assert.deepEqual(changes, [{
+        path: ['foo'],
+        forceChildPathUpdates: true
+      }])
       controller.getSignal('stop')()
       done()
     })
-    timeout.tick()
   })
   it('should be able to pause and continue playback', () => {
     const timeout = timeoutMock()
@@ -307,5 +304,86 @@ describe('Recorder', () => {
       foo: 'bar3'
     })
     controller.getSignal('stop')()
+  })
+  it('should emit events', () => {
+    const timeout = timeoutMock()
+    const RecorderProvider = require('./Recorder').default
+    const controller = new Controller({
+      state: {
+        foo: 'bar'
+      },
+      signals: {
+        record: [({recorder}) => recorder.record({
+          initialState: ['foo']
+        })],
+        update: [({state}) => state.set('foo', 'bar2')],
+        update2: [({state}) => state.set('foo', 'bar3')],
+        stop: [({recorder}) => recorder.stop()],
+        play: [({recorder}) => recorder.play({
+          allowedSignals: ['stop']
+        })]
+      },
+      providers: [RecorderProvider({
+        setTimeout: timeout
+      })]
+    })
+    let eventsCount = 0
+    controller.on('recorder:record', () => {
+      eventsCount++
+    })
+    controller.on('recorder:stop', () => {
+      eventsCount++
+    })
+    controller.on('recorder:play', () => {
+      eventsCount++
+    })
+    controller.getSignal('record')()
+    controller.getSignal('update')()
+    controller.getSignal('stop')()
+    controller.getSignal('play')()
+    timeout.tick() // flush
+    timeout.tick()
+    controller.getSignal('update2')()
+    assert.deepEqual(controller.getState(), {foo: 'bar2'})
+    controller.getSignal('stop')()
+    assert(eventsCount, 4)
+  })
+  it('should add external events', () => {
+    const timeout = timeoutMock()
+    const RecorderProvider = require('./Recorder').default
+    const controller = new Controller({
+      state: {
+        foo: 'bar'
+      },
+      signals: {
+        record: [({recorder}) => recorder.record({
+          initialState: ['foo']
+        })],
+        update: [({state}) => state.set('foo', 'bar2')],
+        update2: [({state}) => state.set('foo', 'bar3')],
+        stop: [({recorder}) => recorder.stop()],
+        play: [({recorder}) => recorder.play({
+          allowedSignals: ['stop']
+        })]
+      },
+      providers: [RecorderProvider({
+        setTimeout: timeout
+      })]
+    })
+    let eventsCount = 0
+    controller.on('test', (data) => {
+      assert.equal(data, 'foo')
+      eventsCount++
+    })
+    controller.getSignal('record')()
+    controller.getSignal('update')()
+    controller.emit('recorder:event', 'test', 'foo')
+    controller.getSignal('stop')()
+    controller.getSignal('play')()
+    timeout.tick() // flush
+    timeout.tick()
+    timeout.tick()
+    controller.getSignal('stop')()
+    assert(eventsCount, 1)
   })
 })

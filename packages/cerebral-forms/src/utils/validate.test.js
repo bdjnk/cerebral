@@ -1,6 +1,7 @@
 /* eslint-env mocha */
 import {Controller} from 'cerebral'
-import {set, state, input} from 'cerebral/operators'
+import {set} from 'cerebral/operators'
+import {state, props} from 'cerebral/tags'
 import {form, validateField, validateForm} from '..'
 import assert from 'assert'
 
@@ -95,7 +96,7 @@ describe('validate', () => {
         },
         signals: {
           fieldChanged: [
-            set(state`form.name.value`, input`value`),
+            set(state`form.name.value`, props`value`),
             validateField('form.name')
           ]
         }
@@ -114,13 +115,14 @@ describe('validate', () => {
             },
             lastName: {
               value: '',
-              isRequired: true
+              isRequired: true,
+              requiredMessage: 'Last Name is required'
             }
           })
         },
         signals: {
           fieldChanged: [
-            set(state`form.firstName.value`, input`value`),
+            set(state`form.firstName.value`, props`value`),
             validateField('form.firstName')
           ]
         }
@@ -128,6 +130,141 @@ describe('validate', () => {
       assert.equal(controller.getState('form.firstName.isValid'), true)
       controller.getSignal('fieldChanged')({value: 'Ben'})
       assert.equal(controller.getState('form.firstName.isValid'), false)
+      assert.equal(controller.getState('form.lastName.isValid'), false)
+      assert.equal(controller.getState('form.firstName.errorMessage'), null)
+      assert.equal(controller.getState('form.lastName.errorMessage'), 'Last Name is required')
+    })
+    it('should validate depending on other fields when more than one dependent field', () => {
+      const controller = Controller({
+        state: {
+          form: form({
+            firstName: {
+              value: '',
+              dependsOn: ['form.lastName', 'form.age']
+            },
+            lastName: {
+              value: '',
+              isRequired: true,
+              requiredMessage: 'Last Name is required'
+            },
+            age: {
+              value: '',
+              validationRules: ['isNumeric'],
+              validationMessages: ['Must be numeric']
+            }
+          })
+        },
+        signals: {
+          fieldChanged: [
+            set(state`form.firstName.value`, props`firstName`),
+            set(state`form.lastName.value`, props`lastName`),
+            set(state`form.age.value`, props`age`),
+            validateField('form.firstName'),
+            validateField('form.lastName'),
+            validateField('form.age')
+          ]
+        }
+      })
+      assert.equal(controller.getState('form.firstName.isValid'), true)
+      controller.getSignal('fieldChanged')({firstName: 'Ben', lastName: 'Young', age: 30})
+      assert.equal(controller.getState('form.firstName.isValid'), true)
+      assert.equal(controller.getState('form.lastName.isValid'), true)
+      assert.equal(controller.getState('form.age.isValid'), true)
+      controller.getSignal('fieldChanged')({firstName: 'Ben', lastName: '', age: 30})
+      assert.equal(controller.getState('form.firstName.isValid'), false)
+      assert.equal(controller.getState('form.lastName.isValid'), false)
+      assert.equal(controller.getState('form.age.isValid'), true)
+      assert.equal(controller.getState('form.firstName.errorMessage'), null)
+      assert.equal(controller.getState('form.lastName.errorMessage'), 'Last Name is required')
+      assert.equal(controller.getState('form.age.errorMessage'), null)
+      controller.getSignal('fieldChanged')({firstName: 'Ben', lastName: '', age: 'five'})
+      assert.equal(controller.getState('form.firstName.isValid'), false)
+      assert.equal(controller.getState('form.lastName.isValid'), false)
+      assert.equal(controller.getState('form.age.isValid'), false)
+      assert.equal(controller.getState('form.firstName.errorMessage'), null)
+      assert.equal(controller.getState('form.lastName.errorMessage'), 'Last Name is required')
+      assert.equal(controller.getState('form.age.errorMessage'), 'Must be numeric')
+      controller.getSignal('fieldChanged')({firstName: 'Ben', lastName: 'Young', age: 'five'})
+      assert.equal(controller.getState('form.firstName.isValid'), false)
+      assert.equal(controller.getState('form.lastName.isValid'), true)
+      assert.equal(controller.getState('form.age.isValid'), false)
+      assert.equal(controller.getState('form.firstName.errorMessage'), null)
+      assert.equal(controller.getState('form.lastName.errorMessage'), null)
+      assert.equal(controller.getState('form.age.errorMessage'), 'Must be numeric')
+    })
+    it('should throw an error if dependsOn field path is not correct', (done) => {
+      const controller = Controller({
+        state: {
+          form: form({
+            firstName: {
+              value: '',
+              dependsOn: 'form.someField'
+            },
+            lastName: {
+              value: '',
+              isRequired: true,
+              requiredMessage: 'Last Name is required'
+            }
+          })
+        },
+        signals: {
+          fieldChanged: [
+            set(state`form.firstName.value`, props`value`),
+            validateField('form.firstName')
+          ]
+        }
+      })
+      controller.removeListener('error')
+      controller.once('error', (error) => {
+        assert(error)
+        done()
+      })
+      controller.getSignal('fieldChanged')({value: 'Ben'})
+    })
+    it('should show correct errorMessages', () => {
+      const controller = Controller({
+        state: {
+          form: form({
+            password: {
+              value: '',
+              validationRules: ['minLength:5'],
+              validationMessages: ['Too short'],
+              dependsOn: 'form.confirmPassword',
+              isRequired: true,
+              requiredMessage: 'Password is required'
+            },
+            confirmPassword: {
+              value: '',
+              validationRules: ['equalsField:password'],
+              validationMessages: ['Not equal to password'],
+              isRequired: true,
+              requiredMessage: 'You must confirm password'
+            }
+          })
+        },
+        signals: {
+          fieldChanged: [
+            set(state`form.password.value`, props`value1`),
+            set(state`form.confirmPassword.value`, props`value2`),
+            validateField('form.password'),
+            validateField('form.confirmPassword')
+          ]
+        }
+      })
+      controller.getSignal('fieldChanged')({value1: 'test', value2: 'otherPassword'})
+      assert.equal(controller.getState('form.password.errorMessage'), 'Too short')
+      assert.equal(controller.getState('form.confirmPassword.errorMessage'), 'Not equal to password')
+      controller.getSignal('fieldChanged')({value1: '', value2: 'otherPassword'})
+      assert.equal(controller.getState('form.password.errorMessage'), 'Password is required')
+      assert.equal(controller.getState('form.confirmPassword.errorMessage'), 'Not equal to password')
+      controller.getSignal('fieldChanged')({value1: 'password', value2: ''})
+      assert.equal(controller.getState('form.password.errorMessage'), null)
+      assert.equal(controller.getState('form.confirmPassword.errorMessage'), 'You must confirm password')
+      controller.getSignal('fieldChanged')({value1: 'password', value2: 'password'})
+      assert.equal(controller.getState('form.password.errorMessage'), null)
+      assert.equal(controller.getState('form.confirmPassword.errorMessage'), null)
+      assert.equal(controller.getState('form.password.isValid'), true)
+      assert.equal(controller.getState('form.confirmPassword.isValid'), true)
     })
   })
   describe('validateForm', () => {
@@ -143,7 +280,7 @@ describe('validate', () => {
         },
         signals: {
           fieldChanged: [
-            set(state`form.name.value`, input`value`)
+            set(state`form.name.value`, props`value`)
           ],
           formSubmitted: [
             validateForm('form')
