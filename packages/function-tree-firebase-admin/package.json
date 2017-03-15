@@ -4,7 +4,6 @@
   "description": "Firebase admin execution and provider",
   "main": "lib/index.js",
   "scripts": {
-    "test": "mocha --compilers js:babel-register 'src/**/*.test.js'",
     "build": "BABEL_ENV=production babel src/ --out-dir=lib/ -s",
     "coverage": "nyc --reporter=lcov --reporter=json npm run test",
     "prepublish": "npm run build"
@@ -15,7 +14,8 @@
   "dependencies": {
     "firebase": "^3.6.2",
     "firebase-admin": "^4.0.4",
-    "firebase-queue": "^1.6.0"
+    "firebase-queue": "^1.6.0",
+    "firebase-server": "^0.7.1"
   },
   "directories": {
     "test": "tests"

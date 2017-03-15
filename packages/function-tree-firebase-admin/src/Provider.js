@@ -12,7 +12,7 @@ function FirebaseAdminProvider (options = {}, customFirebaseInstance) {
     firebase.initializeApp({
       credential: firebase.credential.cert(options.serviceAccount),
       databaseURL: options.databaseURL
-    })  
+    })
   }
 
   function createProvider () {
@@ -70,7 +70,7 @@ function FirebaseAdminProvider (options = {}, customFirebaseInstance) {
             return currentRef[optionKey](options[optionKey])
           }, firebase.database().ref(path)).once('value', (snapshot) => {
             resolve({
-              key: path.split('\/').pop(),
+              key: path.split('/').pop(),
               value: snapshot.val()
             })
           }, (error) => reject({error: error.message}))

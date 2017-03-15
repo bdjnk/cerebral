@@ -1,32 +1,32 @@
 import FunctionTree from 'function-tree'
 import originalWebsocket from 'faye-websocket'
-import Provider from './Provider'
 import proxyquire from 'proxyquire'
 import FirebaseServer from 'firebase-server'
 import FirebaseProvider from './Provider'
 
 const firebase = proxyquire('firebase', {
-	'faye-websocket': {
-		Client: function (url) {
-			url = url.replace(/dummy\.firebaseio\.test/i, 'localhost');
-			return new originalWebsocket.Client(url);
-		},
-		'@global': true
-	}
-});
+  'faye-websocket': {
+    Client: function (url) {
+      url = url.replace(/dummy\.firebaseio\.test/i, 'localhost')
+
+      return new originalWebsocket.Client(url)
+    }
+  },
+  '@global': true
+})
 const firebaseProvider = FirebaseProvider(undefined, firebase)
 
 function runTest (initialData, tasks, assertion, runTree, done) {
-  const server = new FirebaseServer(45000, 'localhost:45000', initialData || {});
+  const server = new FirebaseServer(45000, 'localhost:45000', initialData || {})
   const client = firebase.initializeApp({
     apiKey: 'someApiKey',
     databaseURL: 'ws://dummy.firebaseio.test:45000'
-  });
+  })
 
   function abortTest (err) {
     return client.delete().then(() => {
       server.close(() => {
-        done(err);
+        done(err)
       })
     })
   }
@@ -38,10 +38,10 @@ function runTest (initialData, tasks, assertion, runTree, done) {
           try {
             if (assertion) { assertion(snapshot) }
             done(error)
-          } catch (e) { done(e) }
-        });
-      });
-    });
+          } catch (e) { done(e) }
+        })
+      })
+    })
   }
 
   function rejectTest (error) { resolveTest(error) }
@@ -52,7 +52,7 @@ function runTest (initialData, tasks, assertion, runTree, done) {
         function runTask (taskToRun) {
           runTree('task_' + index, taskToRun.task, {
             task: {
-              resolve() {
+              resolve () {
                 if (taskToRun.assert) {
                   server.getValue()
                     .then((snapshot) => {
@@ -62,7 +62,7 @@ function runTest (initialData, tasks, assertion, runTree, done) {
                     .catch(reject)
                 } else { resolve() }
               },
-              reject(error) {
+              reject (error) {
                 reject(new Error(error))
               }
             },
@@ -70,7 +70,7 @@ function runTest (initialData, tasks, assertion, runTree, done) {
             data: taskToRun.data
           }, (err) => {
             if (err) { abortTest(err) }
-          });
+          })
         }
 
         if (typeof task === 'function') {
@@ -94,7 +94,7 @@ export class TestTasks {
     return (done) => {
       return runTest(
         initialData,
-        Array.isArray(tasks) ? tasks: [tasks],
+        Array.isArray(tasks) ? tasks : [tasks],
         assertion,
         this.runTree,
         done
