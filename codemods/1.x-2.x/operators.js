@@ -14,18 +14,11 @@ module.exports = function (fileInfo, api) {
   }
 
   let addState = false
-  let addInput = false
+  let addProps = false
 
   // Generates an operator factory like so:
   // operatorName`path`
   function generateOperator (operatorName, path) {
-    if (operatorName === 'state') {
-      addState = true
-    }
-    if (operatorName === 'input') {
-      addInput = true
-    }
-
     return j.taggedTemplateExpression(
       j.identifier(operatorName),
       j.templateLiteral(
@@ -78,9 +71,16 @@ module.exports = function (fileInfo, api) {
             path = args.value
           }
 
-          if (operatorName === 'output') {
-            // "output" has now been changed to "input"
-            operatorName = 'input'
+          if (operatorName === 'state') {
+            addState = true
+          }
+          if (operatorName === 'input') {
+            addProps = true
+          }
+
+          if (operatorName === 'output' || operatorName === 'input') {
+            // 'output' has now been changed to 'input'
+            operatorName = 'props'
           }
 
           return generateOperator(operatorName, path)
@@ -95,16 +95,27 @@ module.exports = function (fileInfo, api) {
   // Remove copy operator
   operatorsImport.find(j.ImportSpecifier, { imported: { name: 'copy' } }).remove()
 
-  const specifiers = operatorsImport.get().value.specifiers
+  const tagNames = []
 
   // Add the state import if it's been used
   if (addState) {
-    specifiers.push(j.importSpecifier(j.identifier('state')))
+    tagNames.push('state')
   }
 
   // Add the input import if it's been used
-  if (addInput) {
-    specifiers.push(j.importSpecifier(j.identifier('input')))
+  if (addProps) {
+    tagNames.push('props')
+  }
+
+  if (tagNames.length) {
+    operatorsImport.insertAfter(
+      j.importDeclaration(
+        tagNames.map((name) => {
+          return j.importSpecifier(j.identifier(name))
+        }
+      ),
+      j.stringLiteral('cerebral/tags')
+    ))
   }
 
   operatorsImport.find(j.ImportSpecifier, { imported: { name: 'copy' } })

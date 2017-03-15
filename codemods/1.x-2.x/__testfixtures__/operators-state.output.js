@@ -1,11 +1,13 @@
 /* eslint-disable */
-import {set, unset, toggle, state, input} from 'cerebral/operators';
+import { set, unset, toggle } from 'cerebral/operators';
+
+import { state, props } from "cerebral/tags";
 
 export default [
   // Copy
-  set(input`bar`, state`foo.bar`),
-  set(input`bar`, input`foo`),
-  set(state`foo.bar`, input`foo`),
+  set(props`bar`, state`foo.bar`),
+  set(props`bar`, props`foo`),
+  set(state`foo.bar`, props`foo`),
   set(state`bar.baz`, state`foo.bar`),
 
   // Set state

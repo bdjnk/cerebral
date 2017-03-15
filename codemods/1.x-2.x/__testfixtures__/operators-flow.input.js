@@ -1,7 +1,6 @@
 /* eslint-disable */
 import {
-  when,
-  delay
+  when
 } from 'cerebral/operators';
 
 export default [

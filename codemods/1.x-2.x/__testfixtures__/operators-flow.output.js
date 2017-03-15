@@ -1,5 +1,9 @@
 /* eslint-disable */
-import {when, wait, state, input} from 'cerebral/operators';
+import {
+  when
+} from 'cerebral/operators';
+
+import { state, props } from "cerebral/tags";
 
 export default [
   // Conditional truthy check of state or input
@@ -8,7 +12,7 @@ export default [
     false: []
   },
 
-  when(input`foo.isAwesome`), {
+  when(props`foo.isAwesome`), {
     true: [],
     false: []
   }
